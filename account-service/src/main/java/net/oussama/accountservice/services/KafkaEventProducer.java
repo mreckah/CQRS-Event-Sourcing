@@ -15,8 +15,7 @@ public class KafkaEventProducer {
 
     @EventHandler
     public void on(Object event) {
-        // Simple bridge: publish all domain events to a single topic
-        if (event.getClass().getPackageName().startsWith("net.youssfi.coreapi.events")) {
+        if (event.getClass().getPackageName().startsWith("net.oussama.coreapi.events")) {
             log.info("Publishing event to Kafka: {}", event.getClass().getSimpleName());
             kafkaTemplate.send("bank-events", event.getClass().getSimpleName(), event);
         }

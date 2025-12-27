@@ -59,4 +59,14 @@ A distributed banking system built with **Spring Boot**, **Axon Framework**, and
 ![List Accounts](screenshots/image-8.png)
 
 ---
+### Tables Overview
+
+#### Accounts Table
+<img width="698" height="406" alt="image" src="https://github.com/user-attachments/assets/3362e06b-9b22-4a1e-ad13-63a741507121" />
+
+#### Account Transactions Table
+<img width="1034" height="391" alt="image" src="https://github.com/user-attachments/assets/4cbd0a63-e084-45de-858a-45a791d3fcb6" />
+<img width="579" height="221" alt="image" src="https://github.com/user-attachments/assets/b09aea3e-83c7-46bf-91b9-c3a6a8fbb6db" />
+
+
 
