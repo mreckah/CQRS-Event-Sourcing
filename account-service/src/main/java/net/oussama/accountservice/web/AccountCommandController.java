@@ -1,5 +1,9 @@
 package net.oussama.accountservice.web;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import net.oussama.coreapi.commands.CreateAccountCommand;
@@ -15,10 +19,16 @@ import java.util.concurrent.CompletableFuture;
 @RestController
 @RequestMapping("/accounts")
 @AllArgsConstructor
+@Tag(name = "Account Commands", description = "Account command operations (CQRS Write Side)")
 public class AccountCommandController {
     private final CommandGateway commandGateway;
 
     @PostMapping
+    @Operation(summary = "Create a new account", description = "Creates a new bank account with initial balance")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Account created successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid request")
+    })
     public CompletableFuture<String> createAccount(@RequestBody CreateAccountRequest request) {
         return commandGateway.send(new CreateAccountCommand(
                 UUID.randomUUID().toString(),
@@ -27,6 +37,11 @@ public class AccountCommandController {
     }
 
     @PutMapping("/credit")
+    @Operation(summary = "Credit an account", description = "Add funds to an existing account")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Account credited successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid request or account not activated")
+    })
     public CompletableFuture<String> creditAccount(@RequestBody CreditAccountRequest request) {
         return commandGateway.send(new CreditAccountCommand(
                 request.getAccountId(),
@@ -35,6 +50,11 @@ public class AccountCommandController {
     }
 
     @PutMapping("/debit")
+    @Operation(summary = "Debit an account", description = "Withdraw funds from an existing account")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Account debited successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid request, insufficient balance, or account not activated")
+    })
     public CompletableFuture<String> debitAccount(@RequestBody DebitAccountRequest request) {
         return commandGateway.send(new DebitAccountCommand(
                 request.getAccountId(),
