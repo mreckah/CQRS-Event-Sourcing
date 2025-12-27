@@ -26,6 +26,7 @@ A distributed banking system built with **Spring Boot**, **Axon Framework**, and
 
 ### Search & Query
 ![Event Search](screenshots/image-2.png)
+![alt text](screenshots/image-10.png)
 
 
 ---
