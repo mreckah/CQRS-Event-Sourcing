@@ -98,8 +98,7 @@ _Aggregated transaction data for analytics and reporting._
 Access the analytics dashboard at: [http://localhost:8084/chart.html](http://localhost:8084/chart.html)
 
 The Real-time Analytics Dashboard provides a comprehensive view of account activities through an interactive interface. It visualizes transaction trends, current account balances, and event streams in real-time. The dashboard automatically updates to reflect new transactions, with detailed information available on hover. The intuitive design features color-coded charts for easy differentiation between account balances, debits, and credits.
-
-![Analytics Dashboard](screenshots/![alt text](screenshots/image--.png))
+![alt text](screenshots/image--.png)
 *Live dashboard displaying real-time account activities and transaction analytics*
 
 
