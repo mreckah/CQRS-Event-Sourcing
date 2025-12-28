@@ -1,70 +1,285 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>Analytics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/smoothie/1.34.0/smoothie.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
     <script>
-        function watch(){
-            accountId=document.getElementById('accountId').value;
-            const ctx = document.getElementById('myChart');
-            let chartData={
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Account Balance',
-                        data: [],
-                        borderWidth: 1
-                    },{
-                        label: 'Total Debit',
-                        data: [],
-                        borderWidth: 1
-                    },{
-                        label: 'TotalCredit',
-                        data: [],
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            }
-            let chart=new Chart(ctx,chartData );
-            let stockEventSource = new EventSource("query/accountAnalytics/"+accountId+"/watch");
-            stockEventSource.addEventListener("message", function (event) {
-                var val = JSON.parse(event.data);
-                chartData.data.labels.push(new Date().getTime())
-                chartData.data.datasets[0].data.push(val.balance);
-                chartData.data.datasets[1].data.push(val.totalDebit);
-                chartData.data.datasets[2].data.push(val.totalCredit);
-                chart.update();
-            }, false);
+      let currentEventSource = null;
+      let currentChart = null;
+
+      function setStatus(message, isError) {
+        const el = document.getElementById("status");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = isError
+          ? "alert alert-danger mt-2 mb-0"
+          : "alert alert-info mt-2 mb-0";
+        el.style.display = message ? "block" : "none";
+      }
+
+      function parseTimestamp(ts) {
+        if (!ts) return new Date();
+
+        if (typeof ts === "string" || typeof ts === "number") {
+          const d = new Date(ts);
+          return isNaN(d.getTime()) ? new Date() : d;
         }
+
+        if (Array.isArray(ts)) {
+          const year = Number(ts[0] ?? 0);
+          const month = Number(ts[1] ?? 1) - 1;
+          const day = Number(ts[2] ?? 1);
+          const hour = Number(ts[3] ?? 0);
+          const minute = Number(ts[4] ?? 0);
+          const second = Number(ts[5] ?? 0);
+          const nano = Number(ts[6] ?? 0);
+          return new Date(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            Math.floor(nano / 1e6)
+          );
+        }
+
+        if (typeof ts === "object") {
+          const year = Number(ts.year ?? ts.Y ?? 0);
+          const month = Number(ts.monthValue ?? ts.month ?? 1) - 1;
+          const day = Number(ts.dayOfMonth ?? ts.day ?? 1);
+          const hour = Number(ts.hour ?? 0);
+          const minute = Number(ts.minute ?? 0);
+          const second = Number(ts.second ?? 0);
+          const nano = Number(ts.nano ?? 0);
+          return new Date(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            Math.floor(nano / 1e6)
+          );
+        }
+
+        return new Date();
+      }
+
+      function watch() {
+        const accountId = (
+          document.getElementById("accountId").value || ""
+        ).trim();
+        if (!accountId) {
+          setStatus("Please enter an Account Id.", true);
+          return;
+        }
+
+        if (typeof Chart === "undefined") {
+          setStatus(
+            "Chart.js is not loaded yet. Please refresh and try again.",
+            true
+          );
+          return;
+        }
+
+        setStatus(`Watching ${accountId}...`, false);
+        const ctx = document.getElementById("myChart");
+        let chartData = {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Account Balance",
+                data: [],
+                borderColor: "rgba(54, 162, 235, 1)",
+                backgroundColor: "rgba(54, 162, 235, 0.2)",
+                borderWidth: 2,
+                tension: 0.1,
+                fill: false,
+              },
+              {
+                label: "Total Debit",
+                data: [],
+                borderColor: "rgba(255, 99, 132, 1)",
+                backgroundColor: "rgba(255, 99, 132, 0.2)",
+                borderWidth: 2,
+                tension: 0.1,
+                fill: false,
+              },
+              {
+                label: "Total Credit",
+                data: [],
+                borderColor: "rgba(75, 192, 192, 1)",
+                backgroundColor: "rgba(75, 192, 192, 0.2)",
+                borderWidth: 2,
+                tension: 0.1,
+                fill: false,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true,
+                grid: {
+                  color: "rgba(0, 0, 0, 0.05)",
+                },
+              },
+              x: {
+                grid: {
+                  display: false,
+                },
+              },
+            },
+            plugins: {
+              legend: {
+                position: "top",
+                labels: {
+                  font: {
+                    size: 14,
+                  },
+                },
+              },
+            },
+          },
+        };
+
+        if (currentChart) {
+          currentChart.destroy();
+        }
+        currentChart = new Chart(ctx, chartData);
+
+        function updateChart(val) {
+          const d = parseTimestamp(val.timestamp);
+          chartData.data.labels.push(d.toLocaleTimeString());
+
+          const balance = Number(val.balance);
+          const amount = Number(val.amount);
+          chartData.data.datasets[0].data.push(isNaN(balance) ? 0 : balance);
+
+          let lastDebit =
+            chartData.data.datasets[1].data.length > 0
+              ? chartData.data.datasets[1].data[
+                  chartData.data.datasets[1].data.length - 1
+                ]
+              : 0;
+          let lastCredit =
+            chartData.data.datasets[2].data.length > 0
+              ? chartData.data.datasets[2].data[
+                  chartData.data.datasets[2].data.length - 1
+                ]
+              : 0;
+
+          if (val.operationType === "DEBITED") {
+            chartData.data.datasets[1].data.push(
+              lastDebit + (isNaN(amount) ? 0 : amount)
+            );
+            chartData.data.datasets[2].data.push(lastCredit);
+          } else if (val.operationType === "CREDITED") {
+            chartData.data.datasets[2].data.push(
+              lastCredit + (isNaN(amount) ? 0 : amount)
+            );
+            chartData.data.datasets[1].data.push(lastDebit);
+          } else {
+            chartData.data.datasets[1].data.push(lastDebit);
+            chartData.data.datasets[2].data.push(lastCredit);
+          }
+
+          if (chartData.data.labels.length > 20) {
+            chartData.data.labels.shift();
+            chartData.data.datasets[0].data.shift();
+            chartData.data.datasets[1].data.shift();
+            chartData.data.datasets[2].data.shift();
+          }
+
+          currentChart.update();
+        }
+
+        // 1. Fetch existing history
+        fetch(`/analytics/accounts/${encodeURIComponent(accountId)}/history`)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+          })
+          .then((data) => {
+            if (!Array.isArray(data) || data.length === 0) {
+              setStatus(`No history found for ${accountId} yet.`, false);
+              return;
+            }
+            data.forEach((val) => updateChart(val));
+            setStatus(
+              `Loaded ${data.length} operations for ${accountId}.`,
+              false
+            );
+          })
+          .catch((err) => {
+            setStatus(
+              `Failed to load history for ${accountId}: ${err.message}`,
+              true
+            );
+          });
+
+        if (currentEventSource) {
+          currentEventSource.close();
+        }
+        currentEventSource = new EventSource("/analytics/stream");
+
+        currentEventSource.addEventListener(
+          "account-operation",
+          function (event) {
+            try {
+              var val = JSON.parse(event.data);
+              if (val.accountId === accountId) {
+                updateChart(val);
+              }
+            } catch (e) {
+              setStatus("Received malformed event data from stream.", true);
+            }
+          },
+          false
+        );
+
+        currentEventSource.onerror = function () {
+          setStatus("Stream connection error (SSE).", true);
+        };
+      }
     </script>
-</head>
-<body>
-<div class="p-2">
-    <div class="row">
+  </head>
+
+  <body>
+    <div class="p-2">
+      <div class="row">
         <div class="col">
-            <input type="text" class="form-control" placeholder="Account Id" id="accountId">
+          <input
+            type="text"
+            class="form-control"
+            placeholder="Account Id"
+            id="accountId"
+          />
         </div>
         <div class="col">
-            <button onclick="watch()" class="btn btn-info">Watch</button>
+          <button onclick="watch()" class="btn btn-info">Watch</button>
         </div>
+      </div>
+      <div id="status" style="display: none"></div>
     </div>
-</div>
 
-<canvas id="myChart"></canvas>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<script>
-
-</script>
-</body>
+    <div style="height: 400px; padding: 20px">
+      <canvas id="myChart"></canvas>
+    </div>
+  </body>
 </html>

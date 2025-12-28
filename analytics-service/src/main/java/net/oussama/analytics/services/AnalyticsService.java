@@ -1,12 +1,16 @@
 package net.oussama.analytics.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.oussama.analytics.model.AccountOperation;
 import net.oussama.coreapi.events.AccountCreatedEvent;
 import net.oussama.coreapi.events.AccountCreditedEvent;
 import net.oussama.coreapi.events.AccountDebitedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -18,9 +22,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class AnalyticsService {
 
     private final Map<String, BigDecimal> totalBalancePerCurrency = new HashMap<>();
+
+    private final ObjectMapper objectMapper;
 
     @Getter
     private final Map<String, BigDecimal> accountBalances = new ConcurrentHashMap<>();
@@ -30,47 +37,109 @@ public class AnalyticsService {
 
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
-    @KafkaListener(topics = "bank-events", groupId = "analytics-group")
-    public void consume(Object event) {
-        log.info("Analytics received event: {}", event);
+    private static BigDecimal toBigDecimal(Object v) {
+        if (v == null)
+            return BigDecimal.ZERO;
+        if (v instanceof BigDecimal bd)
+            return bd;
+        if (v instanceof Number n)
+            return new BigDecimal(n.toString());
+        if (v instanceof String s) {
+            if (s.isBlank())
+                return BigDecimal.ZERO;
+            return new BigDecimal(s);
+        }
+        return new BigDecimal(String.valueOf(v));
+    }
+
+    @KafkaListener(topics = "bank-events")
+    public void consume(@Header(KafkaHeaders.RECEIVED_KEY) String eventType, String eventJson) {
+        log.info("Analytics received event (type={}): {}", eventType, eventJson);
 
         AccountOperation operation = null;
 
-        if (event instanceof AccountCreatedEvent e) {
-            totalBalancePerCurrency.merge(e.getCurrency(), e.getInitialBalance(), BigDecimal::add);
-            accountBalances.put(e.getId(), e.getInitialBalance());
+        try {
+            Object event = objectMapper.readValue(eventJson, Object.class);
+            if (event instanceof Map) {
+                Map<?, ?> map = (Map<?, ?>) event;
+                String accountId = Objects.toString(map.get("id"), null);
+                String currency = Objects.toString(map.get("currency"), null);
+                if (accountId == null || accountId.isBlank()) {
+                    log.warn("Received Map payload without 'id' field (type key='{}'): {}", eventType, map);
+                    return;
+                }
 
-            operation = new AccountOperation(
-                    e.getId(),
-                    "CREATED",
-                    e.getInitialBalance(),
-                    e.getInitialBalance(),
-                    e.getCurrency(),
-                    LocalDateTime.now());
+                if ("AccountCreatedEvent".equals(eventType)) {
+                    BigDecimal initialBalance = toBigDecimal(map.get("initialBalance"));
+                    if (currency == null || currency.isBlank())
+                        currency = "";
+                    totalBalancePerCurrency.merge(currency, initialBalance, BigDecimal::add);
+                    accountBalances.put(accountId, initialBalance);
+                    operation = new AccountOperation(accountId, "CREATED", initialBalance, initialBalance, currency,
+                            LocalDateTime.now());
+                } else if ("AccountCreditedEvent".equals(eventType)) {
+                    BigDecimal amount = toBigDecimal(map.get("amount"));
+                    if (currency == null || currency.isBlank())
+                        currency = "";
+                    totalBalancePerCurrency.merge(currency, amount, BigDecimal::add);
+                    BigDecimal newBalance = accountBalances.merge(accountId, amount, BigDecimal::add);
+                    operation = new AccountOperation(accountId, "CREDITED", amount, newBalance, currency,
+                            LocalDateTime.now());
+                } else if ("AccountDebitedEvent".equals(eventType)) {
+                    BigDecimal amount = toBigDecimal(map.get("amount"));
+                    if (currency == null || currency.isBlank())
+                        currency = "";
+                    totalBalancePerCurrency.merge(currency, amount.negate(), BigDecimal::add);
+                    BigDecimal newBalance = accountBalances.merge(accountId, amount.negate(), BigDecimal::add);
+                    operation = new AccountOperation(accountId, "DEBITED", amount, newBalance, currency,
+                            LocalDateTime.now());
+                } else {
+                    log.debug("Ignoring unsupported event type key '{}'", eventType);
+                    return;
+                }
+            } else if (event instanceof AccountCreatedEvent) {
+                AccountCreatedEvent e = (AccountCreatedEvent) event;
+                totalBalancePerCurrency.merge(e.getCurrency(), e.getInitialBalance(), BigDecimal::add);
+                accountBalances.put(e.getId(), e.getInitialBalance());
 
-        } else if (event instanceof AccountCreditedEvent e) {
-            totalBalancePerCurrency.merge(e.getCurrency(), e.getAmount(), BigDecimal::add);
-            BigDecimal newBalance = accountBalances.merge(e.getId(), e.getAmount(), BigDecimal::add);
+                operation = new AccountOperation(
+                        e.getId(),
+                        "CREATED",
+                        e.getInitialBalance(),
+                        e.getInitialBalance(),
+                        e.getCurrency(),
+                        LocalDateTime.now());
+            } else if (event instanceof AccountCreditedEvent) {
+                AccountCreditedEvent e = (AccountCreditedEvent) event;
+                totalBalancePerCurrency.merge(e.getCurrency(), e.getAmount(), BigDecimal::add);
+                BigDecimal newBalance = accountBalances.merge(e.getId(), e.getAmount(), BigDecimal::add);
 
-            operation = new AccountOperation(
-                    e.getId(),
-                    "CREDITED",
-                    e.getAmount(),
-                    newBalance,
-                    e.getCurrency(),
-                    LocalDateTime.now());
+                operation = new AccountOperation(
+                        e.getId(),
+                        "CREDITED",
+                        e.getAmount(),
+                        newBalance,
+                        e.getCurrency(),
+                        LocalDateTime.now());
+            } else if (event instanceof AccountDebitedEvent) {
+                AccountDebitedEvent e = (AccountDebitedEvent) event;
+                totalBalancePerCurrency.merge(e.getCurrency(), e.getAmount().negate(), BigDecimal::add);
+                BigDecimal newBalance = accountBalances.merge(e.getId(), e.getAmount().negate(), BigDecimal::add);
 
-        } else if (event instanceof AccountDebitedEvent e) {
-            totalBalancePerCurrency.merge(e.getCurrency(), e.getAmount().negate(), BigDecimal::add);
-            BigDecimal newBalance = accountBalances.merge(e.getId(), e.getAmount().negate(), BigDecimal::add);
-
-            operation = new AccountOperation(
-                    e.getId(),
-                    "DEBITED",
-                    e.getAmount(),
-                    newBalance,
-                    e.getCurrency(),
-                    LocalDateTime.now());
+                operation = new AccountOperation(
+                        e.getId(),
+                        "DEBITED",
+                        e.getAmount(),
+                        newBalance,
+                        e.getCurrency(),
+                        LocalDateTime.now());
+            } else {
+                log.debug("Ignoring unsupported event type '{}'", event.getClass().getName());
+                return;
+            }
+        } catch (Exception e) {
+            log.error("Error processing Kafka message: {}", e.getMessage(), e);
+            return;
         }
 
         if (operation != null) {
@@ -78,9 +147,8 @@ public class AnalyticsService {
                     .add(operation);
 
             sendToAllEmitters(operation);
+            log.info("Current Total Balances: {}", totalBalancePerCurrency);
         }
-
-        log.info("Current Total Balances: {}", totalBalancePerCurrency);
     }
 
     public void addEmitter(SseEmitter emitter) {
