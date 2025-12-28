@@ -19,10 +19,6 @@ A distributed banking system built with **Spring Boot**, **Axon Framework**, and
 
 ### Overview
 ![Axon Server Overview](screenshots/image-1.png)
-
-### Event Store
-![Event Store](screenshots/axon-events.png)
-
 *All events are stored and can be replayed*
 
 ### Search & Query
